@@ -32,7 +32,8 @@ mod parser;
 mod validators;
 
 pub use core::{
-    ask, ask_with_default, ask_with_validation, choose, confirm, form, multi_select, try_ask,
+    FieldValue, ask, ask_with_default, ask_with_validation, choose, confirm, form, multi_select,
+    try_ask,
 };
 pub use error::{Result, VelvetIOError};
 pub use parser::Parse;
@@ -48,13 +49,17 @@ macro_rules! ask {
         $crate::ask::<$type>($prompt)
     };
     ($prompt:expr, validate: $validator:expr) => {
-        $crate::ask_with_validation::<String, _>($prompt, $validator, None)
+        $crate::ask_with_validation::<String, _>($prompt, |s: &String| $validator(s), None)
     };
     ($prompt:expr => $type:ty, validate: $validator:expr) => {
         $crate::ask_with_validation::<$type, _>($prompt, $validator, None)
     };
     ($prompt:expr, validate: $validator:expr, error: $error_msg:expr) => {
-        $crate::ask_with_validation::<String, _>($prompt, $validator, Some($error_msg))
+        $crate::ask_with_validation::<String, _>(
+            $prompt,
+            |s: &String| $validator(s),
+            Some($error_msg),
+        )
     };
     ($prompt:expr => $type:ty, validate: $validator:expr, error: $error_msg:expr) => {
         $crate::ask_with_validation::<$type, _>($prompt, $validator, Some($error_msg))
@@ -97,7 +102,7 @@ macro_rules! choose {
     };
 
     ($prompt:expr, $choices:expr) => {
-        $crate::choose($prompt, $choices.as_ref())
+        $crate::choose($prompt, &$choices)
     };
 }
 
@@ -108,7 +113,7 @@ macro_rules! multi_select {
     };
 
     ($prompt:expr, $choices:expr) => {
-        $crate::multi_select($prompt, $choices.as_ref())
+        $crate::multi_select($prompt, &$choices)
     };
 
 }
@@ -122,7 +127,7 @@ macro_rules! quick_form {
         let mut form_data = std::collections::HashMap::new();
         $(
             let value = $crate::ask::<String>($prompt);
-            form_data.insert($key.to_string(), value);
+            form_data.insert($key.to_string(), $crate::FieldValue::Text(value));
         )+
         form_data
     }};
@@ -149,8 +154,8 @@ macro_rules! quick_parse {
 
 pub mod prelude {
     pub use crate::{
-        Parse, Result, VelvetIOError, ask, choose, confirm, form, multi_select, quick_form,
-        quick_parse, try_ask,
+        FieldValue, Parse, Result, VelvetIOError, ask, choose, confirm, form, multi_select,
+        quick_form, quick_parse, try_ask,
     };
     pub use crate::{and, in_range, is_positive, max_length, min_length, not_empty, or};
 }

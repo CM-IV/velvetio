@@ -5,7 +5,7 @@
 use velvetio::prelude::*;
 
 fn main() {
-    println!("🚀 Development Environment Setup Wizard\n");
+    println!("Development Environment Setup Wizard\n");
 
     // Basic ask! macro usage
     let dev_name = ask!("Developer name");
@@ -37,7 +37,7 @@ fn main() {
         ["AWS", "Google Cloud", "Azure", "Digital Ocean", "None"]
     );
 
-    let choices = &[
+    let choices = [
         "Rust",
         "Python",
         "JavaScript",
@@ -56,7 +56,7 @@ fn main() {
     );
 
     // Form builder - showcasing all field types
-    println!("\n📝 Project Configuration");
+    println!("\nProject Configuration");
     let project_config = form()
         .text("project_name", "Project name")
         .number("version_major", "Major version number")
@@ -155,7 +155,7 @@ fn main() {
     };
 
     // Show everything we collected
-    println!("\n✅ Setup Complete!");
+    println!("\nSetup Complete!");
     println!("Developer: {} <{}>", dev_name, email);
     println!("Team size: {}", team_size);
     println!("Editor: {} (dev port: {})", editor, dev_port);
@@ -172,6 +172,12 @@ fn main() {
         project_config.get("project_name").unwrap(),
         project_id.as_str()
     );
+
+    if let Some(FieldValue::Boolean(is_open_source)) = project_config.get("open_source") {
+        if *is_open_source {
+            println!("Project is open source!");
+        }
+    }
 
     println!("Coordinates: {:?}", coordinates);
     println!("Tags: {:?}", tags);

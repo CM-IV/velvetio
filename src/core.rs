@@ -1,34 +1,88 @@
 // src/core.rs
 
-use crate::{Parse, Result};
-use std::collections::HashMap;
+use crate::{Parse, Result, VelvetIOError};
 use std::io::{self, Write};
+
+/// Holds the strongly-typed result of a form field
+#[derive(Debug, Clone, PartialEq)]
+pub enum FieldValue {
+    Text(String),
+    Number(f64),
+    Boolean(bool),
+    Choice(String),
+    MultiChoice(Vec<String>),
+    Optional(Option<String>),
+    ValidatedText(String),
+}
+
+impl std::fmt::Display for FieldValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FieldValue::Text(s) | FieldValue::Choice(s) | FieldValue::ValidatedText(s) => {
+                write!(f, "{}", s)
+            }
+            FieldValue::Number(n) => write!(f, "{}", n),
+            FieldValue::Boolean(b) => write!(f, "{}", b),
+            FieldValue::MultiChoice(v) => write!(f, "{}", v.join(", ")),
+            FieldValue::Optional(o) => match o {
+                Some(s) => write!(f, "{}", s),
+                None => write!(f, ""),
+            },
+        }
+    }
+}
+
+/// Prints the prompt and flushes stdout so it appears immediately.
+fn print_prompt(text: &str) {
+    print!("{}: ", text);
+    let _ = io::stdout().flush();
+}
+
+/// Reads a line from stdin, returning a trimmed string.
+/// Returns `Ok(Some(String))` on success, `Ok(None)` on EOF (Ctrl+D / closed pipe),
+/// and `Err` on actual I/O errors.
+fn read_line() -> io::Result<Option<String>> {
+    let mut input = String::new();
+    let bytes_read = io::stdin().read_line(&mut input)?;
+
+    if bytes_read == 0 {
+        Ok(None) // EOF encountered
+    } else {
+        Ok(Some(input.trim().to_string()))
+    }
+}
 
 /// Keep asking until we get valid input
 pub fn ask<T: Parse>(prompt: &str) -> T {
     loop {
-        print!("{}: ", prompt);
-        let _ = io::stdout().flush();
+        print_prompt(prompt);
 
-        let mut input = String::new();
-        match io::stdin().read_line(&mut input) {
-            Ok(_) => match T::parse(input.trim()) {
+        match read_line() {
+            Ok(Some(input)) => match T::parse(&input) {
                 Ok(value) => return value,
-                Err(e) => eprintln!("❌ {}", e),
+                Err(e) => eprintln!("{}", e),
             },
-            Err(e) => eprintln!("❌ Input error: {}", e),
+            Ok(None) => {
+                eprintln!("\nUnexpected end of input (EOF). Exiting.");
+                std::process::exit(1);
+            }
+            Err(e) => eprintln!("Input error: {}", e),
         }
     }
 }
 
 /// Try once, return Result instead of retrying
 pub fn try_ask<T: Parse>(prompt: &str) -> Result<T> {
-    print!("{}: ", prompt);
-    let _ = io::stdout().flush();
+    print_prompt(prompt);
 
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    T::parse(input.trim())
+    match read_line()? {
+        Some(input) => T::parse(&input),
+        None => Err(VelvetIOError::new(
+            "Unexpected end of input (EOF)",
+            "",
+            "valid input",
+        )),
+    }
 }
 
 /// Ask with validation function
@@ -40,26 +94,27 @@ pub fn ask_with_validation<T: Parse, F>(
 where
     F: Fn(&T) -> bool,
 {
-    let default_error = "Invalid input, please try again";
-    let error_msg = error_message.unwrap_or(default_error);
+    let error_msg = error_message.unwrap_or("Invalid input, please try again");
 
     loop {
-        print!("{}: ", prompt);
-        let _ = io::stdout().flush();
+        print_prompt(prompt);
 
-        let mut input = String::new();
-        match io::stdin().read_line(&mut input) {
-            Ok(_) => match T::parse(input.trim()) {
+        match read_line() {
+            Ok(Some(input)) => match T::parse(&input) {
                 Ok(value) => {
                     if validator(&value) {
                         return value;
                     } else {
-                        eprintln!("❌ {}", error_msg);
+                        eprintln!("{}", error_msg);
                     }
                 }
-                Err(e) => eprintln!("❌ {}", e),
+                Err(e) => eprintln!("{}", e),
             },
-            Err(e) => eprintln!("❌ Input error: {}", e),
+            Ok(None) => {
+                eprintln!("\nUnexpected end of input (EOF). Exiting.");
+                std::process::exit(1);
+            }
+            Err(e) => eprintln!("Input error: {}", e),
         }
     }
 }
@@ -69,17 +124,20 @@ pub fn ask_with_default<T: Parse + std::fmt::Display + Clone>(prompt: &str, defa
     print!("{} [{}]: ", prompt, default);
     let _ = io::stdout().flush();
 
-    let mut input = String::new();
-    match io::stdin().read_line(&mut input) {
-        Ok(_) => {
-            let trimmed = input.trim();
-            if trimmed.is_empty() {
+    match read_line() {
+        // Empty input (just Enter) -> use default
+        Ok(Some(input)) if input.is_empty() => default,
+        // Valid parse -> return value
+        Ok(Some(input)) => match T::parse(&input) {
+            Ok(value) => value,
+            // Invalid parse -> warn user, then fall back to default
+            Err(e) => {
+                eprintln!("{}, using default: {}", e, default);
                 default
-            } else {
-                T::parse(trimmed).unwrap_or(default)
             }
-        }
-        Err(_) => default,
+        },
+        // EOF or IO error -> silently fall back to default
+        _ => default,
     }
 }
 
@@ -91,7 +149,7 @@ pub fn confirm(prompt: &str) -> bool {
 /// Pick one option from a list
 pub fn choose<T>(prompt: &str, choices: &[T]) -> T
 where
-    T: std::fmt::Display + Clone + AsRef<str>,
+    T: std::fmt::Display + Clone,
 {
     if choices.is_empty() {
         panic!("Cannot choose from empty list");
@@ -107,8 +165,8 @@ where
             Ok(index) if index >= 1 && index <= choices.len() => {
                 return choices[index - 1].clone();
             }
-            Ok(_) => eprintln!("❌ Please choose between 1 and {}", choices.len()),
-            Err(e) => eprintln!("❌ {}", e),
+            Ok(_) => eprintln!("Please choose between 1 and {}", choices.len()),
+            Err(e) => eprintln!("{}", e),
         }
     }
 }
@@ -116,7 +174,7 @@ where
 /// Pick multiple options from a list
 pub fn multi_select<T>(prompt: &str, choices: &[T]) -> Vec<T>
 where
-    T: std::fmt::Display + Clone + AsRef<str>,
+    T: std::fmt::Display + Clone,
 {
     if choices.is_empty() {
         return Vec::new();
@@ -150,12 +208,12 @@ where
                     selected.push(choices[num - 1].clone());
                 }
                 Ok(num) => {
-                    eprintln!("❌ {} is not a valid option (1-{})", num, choices.len());
+                    eprintln!("{} is not a valid option (1-{})", num, choices.len());
                     valid = false;
                     break;
                 }
                 Err(_) => {
-                    eprintln!("❌ Please enter numbers separated by commas");
+                    eprintln!("Please enter numbers separated by commas");
                     valid = false;
                     break;
                 }
@@ -273,42 +331,46 @@ impl Form {
     }
 
     /// Run through all fields and collect the results
-    pub fn collect(self) -> HashMap<String, String> {
-        let mut results = HashMap::new();
-
+    pub fn collect(self) -> std::collections::HashMap<String, FieldValue> {
+        let mut results = std::collections::HashMap::new();
         for field in self.fields {
             let value = match field.field_type {
-                FieldType::Text => ask::<String>(&field.prompt),
-                FieldType::Number => ask::<f64>(&field.prompt).to_string(),
-                FieldType::Boolean => ask::<bool>(&field.prompt).to_string(),
+                FieldType::Text => FieldValue::Text(ask::<String>(&field.prompt)),
+                FieldType::Number => FieldValue::Number(ask::<f64>(&field.prompt)),
+                FieldType::Boolean => FieldValue::Boolean(ask::<bool>(&field.prompt)),
                 FieldType::Choice(choices) => {
                     let choice_refs: Vec<&str> = choices.iter().map(|s| s.as_str()).collect();
-                    choose(&field.prompt, &choice_refs).to_string()
+                    FieldValue::Choice(choose(&field.prompt, &choice_refs).to_string())
                 }
                 FieldType::MultiChoice(choices) => {
                     let choice_refs: Vec<&str> = choices.iter().map(|s| s.as_str()).collect();
                     let selected = multi_select(&field.prompt, &choice_refs);
-                    selected.join(", ")
+                    let selected_strings: Vec<String> =
+                        selected.iter().map(|s| s.to_string()).collect();
+                    FieldValue::MultiChoice(selected_strings)
                 }
                 FieldType::Optional => {
                     let input = ask::<String>(&field.prompt);
                     if input.trim().is_empty() {
-                        "".to_string()
+                        FieldValue::Optional(None)
                     } else {
-                        input
+                        FieldValue::Optional(Some(input))
                     }
                 }
                 FieldType::ValidatedText {
                     validator,
                     error_msg,
                 } => {
-                    ask_with_validation(&field.prompt, |s: &String| validator(s), Some(&error_msg))
+                    let res = ask_with_validation(
+                        &field.prompt,
+                        |s: &String| validator(s),
+                        Some(&error_msg),
+                    );
+                    FieldValue::ValidatedText(res)
                 }
             };
-
             results.insert(field.key, value);
         }
-
         results
     }
 }

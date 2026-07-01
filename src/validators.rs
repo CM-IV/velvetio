@@ -1,18 +1,18 @@
 // src/validators.rs
 
 /// String is not empty after trimming
-pub fn not_empty(s: &String) -> bool {
-    !s.trim().is_empty()
+pub fn not_empty<S: AsRef<str>>(s: &S) -> bool {
+    !s.as_ref().trim().is_empty()
 }
 
 /// String has at least min characters
-pub fn min_length(min: usize) -> impl Fn(&String) -> bool {
-    move |s: &String| s.len() >= min
+pub fn min_length(min: usize) -> impl Fn(&str) -> bool {
+    move |s: &str| s.chars().count() >= min
 }
 
 /// String has at most max characters
-pub fn max_length(max: usize) -> impl Fn(&String) -> bool {
-    move |s: &String| s.len() <= max
+pub fn max_length(max: usize) -> impl Fn(&str) -> bool {
+    move |s: &str| s.chars().count() <= max
 }
 
 /// Number is positive (> 0)
@@ -26,7 +26,7 @@ pub fn in_range<T: PartialOrd + Copy>(min: T, max: T) -> impl Fn(&T) -> bool {
 }
 
 /// Both validators must pass
-pub fn and<T, F1, F2>(validator1: F1, validator2: F2) -> impl Fn(&T) -> bool
+pub fn and<T: ?Sized, F1, F2>(validator1: F1, validator2: F2) -> impl Fn(&T) -> bool
 where
     F1: Fn(&T) -> bool,
     F2: Fn(&T) -> bool,
@@ -35,7 +35,7 @@ where
 }
 
 /// Either validator can pass
-pub fn or<T, F1, F2>(validator1: F1, validator2: F2) -> impl Fn(&T) -> bool
+pub fn or<T: ?Sized, F1, F2>(validator1: F1, validator2: F2) -> impl Fn(&T) -> bool
 where
     F1: Fn(&T) -> bool,
     F2: Fn(&T) -> bool,
